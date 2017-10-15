@@ -37,6 +37,7 @@ module Text.Pandoc.Writers
     , writers
     , writeAsciiDoc
     , writeBeamer
+    , writeCode
     , writeCommonMark
     , writeConTeXt
     , writeCustom
@@ -83,7 +84,7 @@ module Text.Pandoc.Writers
 
 import Data.Aeson
 import Data.List (intercalate)
-import Data.Text (Text)
+import Data.Text (Text, pack, lines, append, unlines)
 import Text.Pandoc.Class
 import Text.Pandoc.Definition
 import Text.Pandoc.Options
@@ -175,7 +176,7 @@ writers = [
   ,("gfm"          , TextWriter writeCommonMark)
   ,("tei"          , TextWriter writeTEI)
   ,("muse"         , TextWriter writeMuse)
-  ]
+  ] ++ codeWriters
 
 -- | Retrieve writer, extensions based on formatSpec (format+extensions).
 getWriter :: PandocMonad m => String -> Either String (Writer m, Extensions)
@@ -190,3 +191,33 @@ getWriter s
 
 writeJSON :: WriterOptions -> Pandoc -> Text
 writeJSON _ = UTF8.toText . BL.toStrict . encode
+
+-- | Association list of code formats and writers.
+codeWriters :: PandocMonad m => [ (String, Writer m) ]
+codeWriters = [ ("code{.hs}"     , TextWriter (writeCode "hs"))
+              , ("code{.maude}"  , TextWriter (writeCode "maude"))
+              , ("code{.k}"      , TextWriter (writeCode "k"))
+              , ("code{.c}"      , TextWriter (writeCode "c"))
+              , ("code{.c++}"    , TextWriter (writeCode "c++"))
+              , ("code{.sh}"     , TextWriter (writeCode "zsh"))
+              , ("code{.py}"     , TextWriter (writeCode "python"))
+              --- , ("code-custom" , TextWriter (writeCode "???"))
+              ]
+
+writeCode :: PandocMonad m => String -> WriterOptions -> Pandoc -> m Text
+writeCode ctype opts (Pandoc _ bs) = mapM (writeCodeBlock ctype opts) bs >>= return . Data.Text.unlines
+
+writeCodeBlock :: PandocMonad m => String -> WriterOptions -> Block -> m Text
+writeCodeBlock ctype _ (CodeBlock (_, classes, _) str)
+    | ctype `elem` classes  = return . Data.Text.unlines . map pack $ ["", str, ""]
+writeCodeBlock ctype opts b = writeMarkdown (opts { writerWrapText = WrapPreserve }) (Pandoc nullMeta [b]) >>= return . commentPrefix ctype
+
+commentPrefix :: String -> Text -> Text
+commentPrefix "hs"    = Data.Text.unlines . map (append (pack "--  "  )) . Data.Text.lines
+commentPrefix "maude" = Data.Text.unlines . map (append (pack "--- ; ")) . Data.Text.lines
+commentPrefix "k"     = Data.Text.unlines . map (append (pack "//  "  )) . Data.Text.lines
+commentPrefix "c"     = Data.Text.unlines . map (append (pack "//  "  )) . Data.Text.lines
+commentPrefix "c++"   = Data.Text.unlines . map (append (pack "//  "  )) . Data.Text.lines
+commentPrefix "sh"    = Data.Text.unlines . map (append (pack "#   "  )) . Data.Text.lines
+commentPrefix "py"    = Data.Text.unlines . map (append (pack "py  "  )) . Data.Text.lines
+commentPrefix _       = undefined
